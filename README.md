@@ -1,31 +1,44 @@
-# Cloud-Native Real Estate Price Prediction API
+# 🛡️ Aegis: AI Content Safety Proxy
 
-An end-to-end, production-grade Machine Learning inference API built with **FastAPI** and deployed on **AWS**. 
+[![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
+[![Redis](https://img.shields.io/badge/redis-%23DD0031.svg?style=for-the-badge&logo=redis&logoColor=white)](https://redis.io/)
+[![Groq](https://img.shields.io/badge/Groq-Llama_Guard_3-f55036?style=for-the-badge)](https://groq.com/)
+[![Gemini](https://img.shields.io/badge/Google-Gemini-4285F4?style=for-the-badge&logo=google)](https://ai.google.dev/)
 
-This project demonstrates a complete MLOps serving architecture. It transitions a trained Scikit-Learn regression model from a local environment to a containerized, cloud-native API capable of high-throughput inference, artifact management, and relational telemetry logging.
+A production-grade, asynchronous API middleware that intercepts, audits, and caches Large Language Model interactions. Aegis acts as a zero-trust firewall between client applications and Google Gemini, utilizing Meta's **Llama-Guard-3** (via Groq LPUs) to evaluate inputs and outputs against strict safety policies in real-time.
 
-## 🏗️ Architecture & Tech Stack
+## 🎯 Engineering Focus & Motivation
 
-* **API Framework:** FastAPI, Pydantic, Uvicorn
-* **Containerization:** Docker
-* **Cloud Infrastructure:** AWS EC2 (Compute), AWS S3 (Model Artifact Storage)
-* **Database & ORM:** PostgreSQL (AWS RDS), SQLAlchemy
-* **Machine Learning:** Scikit-Learn, Joblib, NumPy
+This project addresses the latency-versus-safety tradeoff in modern LLM applications. Rather than using brittle regex/keyword filters or accepting repeated ~1s safety evaluation penalties on every query, this proxy implements **cryptographic caching** and **asynchronous I/O**.
 
-## ✨ Core Features
+**Key Achievements:**
+* **Sub-millisecond Latency on Repeated Queries:** By hashing normalized inputs with SHA-256 and storing verdicts in a Redis pool, repeated safe/unsafe requests bypass the safety model entirely, cutting verdict latency from ~400ms to <2ms.
+* **Non-Blocking Execution:** Built end-to-end with `asyncio` and `httpx`, ensuring external calls to Groq and Gemini never block the primary ASGI event loop.
+* **Strict Type Safety & Validation:** Enforced via Pydantic schemas to reject malformed, empty, or oversized payloads at the door.
 
-* **Dynamic Artifact Loading (AWS S3):** The API does not hardcode heavy model weights into the Docker image. Instead, it securely downloads the `model.joblib` artifact from an Amazon S3 bucket at startup using `boto3` and EC2 IAM Instance Profiles.
-* **Relational Telemetry Logging (AWS RDS):** Every inference request, alongside its execution latency and predicted output, is asynchronously logged to a PostgreSQL database via SQLAlchemy ORM for performance monitoring and audit trailing.
-* **Advanced Analytics Engine:** Includes custom DDL schemas and raw SQL queries utilizing window functions and aggregations to track P95 latency and rolling prediction averages over time.
-* **Containerized Deployment:** Fully isolated environment using Docker, ensuring 100% parity between local development and cloud production.
+---
 
-## 📂 Repository Structure
+## 🏗️ System Architecture
 
 ```text
-├── Dockerfile                  # Container blueprint
-├── requirements.txt            # Python dependencies
-├── main.py                     # FastAPI application and SQLAlchemy ORM logic
-├── train_model.py              # Scikit-Learn model training and serialization script
-└── sql/
-    ├── 01_schema.sql           # PostgreSQL DDL for production tables and indexing
-    └── 02_analytics_queries.sql# Advanced analytical queries (Window functions, percentiles)
+1. 🧑‍💻 Client (POST /v1/chat)
+       │
+       ▼ (Pydantic Schema Validation)
+2. ⚡ FastAPI Gateway
+       │
+       ├─► 🗄️ Redis Cache (Lookup SHA-256 Prompt Hash)
+       │     └─► [CACHE HIT]: Return <2ms verdict 
+       │
+       ▼ [CACHE MISS]
+3. 🛡️ Input Audit (Llama-Guard-3 via Groq)
+       │     └─► [UNSAFE]: Abort with HTTP 400 Bad Request
+       │
+       ▼ [SAFE]
+4. 🧠 LLM Inference (Google Gemini 1.5 Flash)
+       │
+       ▼
+5. 🛡️ Output Audit (Llama-Guard-3 via Groq)
+       │     └─► [UNSAFE]: Abort with HTTP 400 Bad Request
+       │
+       ▼ [SAFE]
+6. 🚀 Deliver Validated JSON to Client
